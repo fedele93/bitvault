@@ -6,8 +6,10 @@ A privacy-focused, self-hosted pastebin and file sharing service built in Rust. 
 
 BitVault is a maintained fork of [Microbin](https://github.com/szabodanika/microbin), with telemetry removed, updated dependencies, and a focus on privacy and simplicity.
 
+This repository is [fedele93](https://github.com/fedele93)'s personal edition of [overcuriousity/bitvault](https://github.com/overcuriousity/bitvault). It adds multi-file client-side encrypted uploads, a hardened client-side encryption scheme (PBKDF2 + AES-256-GCM), gallery/stream/list attachment views and the `--default-view` option on top of upstream.
+
 ## Access
-[https://bitvault.overcuriousity.org](https://bitvault.overcuriousity.org)
+Upstream public instance: [https://bitvault.overcuriousity.org](https://bitvault.overcuriousity.org)
 
 ## Features
 
@@ -31,7 +33,7 @@ BitVault is a maintained fork of [Microbin](https://github.com/szabodanika/micro
 sudo pacman -S rust git
 
 # Clone and build
-git clone https://github.com/overcuriousity/bitvault
+git clone https://github.com/fedele93/bitvault
 cd bitvault
 cargo build --release
 cargo run --release
@@ -42,7 +44,7 @@ cargo run --release
 Prebuilt multi-arch images (amd64/arm64) are published to GHCR on every release:
 
 ```bash
-docker pull ghcr.io/overcuriousity/bitvault:latest
+docker pull ghcr.io/fedele93/bitvault:latest
 ```
 
 Quick start with docker compose — download [`compose.yaml`](compose.yaml) and [`.env`](.env), adjust `.env` (at minimum `BITVAULT_ADMIN_PASSWORD` and `BITVAULT_PUBLIC_PATH`), then:
@@ -54,7 +56,7 @@ docker compose --env-file .env up --detach
 Or use the interactive setup script:
 
 ```bash
-curl -sO https://raw.githubusercontent.com/overcuriousity/bitvault/master/docker-setup.sh && bash docker-setup.sh
+curl -sO https://raw.githubusercontent.com/fedele93/bitvault/master/docker-setup.sh && bash docker-setup.sh
 ```
 
 Data is stored in the named volume `bitvault_data`. The container runs as nonroot (uid 65532) on a distroless base image. Secrets can be mounted as files and referenced with `file://` paths (see Configuration below).
@@ -170,6 +172,17 @@ Secret values (`BITVAULT_ADMIN_USERNAME`, `BITVAULT_ADMIN_PASSWORD`, `BITVAULT_B
 | `BITVAULT_HIDE_FOOTER` | `--hide-footer` | `false` | Hide the page footer |
 | `BITVAULT_HIDE_LOGO` | `--hide-logo` | `false` | Hide the logo |
 | `BITVAULT_TRANSLATE_URL` | `--translate-url` | — | Base URL of a [translation-inference](https://github.com/overcuriousity/translation-inference) instance. When set, a **Translate** link appears on text paste view pages, deep-linking into the translation service with the paste's raw URL as the `from=` parameter. Suppressed for URL-type pastes, client-encrypted pastes, server-encrypted pastes, and when `PUBLIC_PATH` is unset. |
+
+## Encryption
+
+BitVault has two independent encryption layers, selected with the privacy level of an upload:
+
+- **`private` — server-side.** The server encrypts text and files with the password you choose (AES-256-CBC via `magic-crypt`). The password is sent to the server over HTTPS and is never stored; without it the stored data is unreadable, but you are trusting the server (and its operator) while it handles the password.
+- **`secret` — client-side (end-to-end).** Everything is encrypted *in your browser* before upload, and the password never leaves your device. The browser derives a key with **PBKDF2-HMAC-SHA256 (600 000 iterations, random 16-byte salt)** and encrypts with **AES-256-GCM** (random 96-bit IV, authenticated — wrong passwords and tampering are detected). Several files are bundled into one ZIP before encryption. The server adds its own `private`-style layer on top using a random per-upload key, which is itself stored encrypted with your password, so the server can gate access without ever seeing the password.
+
+`secret` needs WebCrypto (`window.crypto.subtle`), which browsers only enable in **secure contexts: HTTPS or `localhost`**. On a plain-HTTP LAN deployment the UI refuses to create secret uploads and tells you why; `private` keeps working. Put BitVault behind an HTTPS reverse proxy to use `secret`.
+
+Uploads created with the previous client-side scheme (AES-CTR, password padded as key, hex output) are still readable: the pages detect the old format and decrypt it with the bundled legacy code. New uploads always use the current format. The API returns `secret` content as-is: the ciphertext string, which starts with `v2.`.
 
 ## REST API
 

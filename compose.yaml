@@ -1,6 +1,6 @@
 services:
   bitvault:
-    image: ghcr.io/overcuriousity/bitvault:latest
+    image: ghcr.io/fedele93/bitvault:latest
     restart: always
     ports:
      - "${BITVAULT_PORT:-8080}:8080"

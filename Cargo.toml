@@ -1,12 +1,12 @@
 [package]
 name = "bitvault"
-version = "1.6.0"
+version = "1.7.0"
 edition = "2021"
-authors = ["overcuriousity, originally Daniel Szabo <daniel@microbin.eu> and contributors"]
+authors = ["fedele93, overcuriousity, originally Daniel Szabo <daniel@microbin.eu> and contributors"]
 license = "GPL-3.0-only"
 description = "Simple, performant and puristic, entirely self-contained Pastebin and URL shortener."
 readme = "README.md"
-repository = "https://github.com/overcuriousity/bitvault"
+repository = "https://github.com/fedele93/bitvault"
 keywords = ["pastebin", "filesharing", "bitvault", "actix", "selfhosted"]
 categories = ["pastebins"]
 

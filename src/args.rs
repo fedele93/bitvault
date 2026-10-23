@@ -184,6 +184,14 @@ pub struct Args {
 
     #[clap(long, env = "BITVAULT_TRANSLATE_URL")]
     pub translate_url: Option<String>,
+
+    #[clap(
+        long,
+        env = "BITVAULT_DEFAULT_VIEW",
+        default_value = "gallery",
+        value_parser = clap::builder::PossibleValuesParser::new(["gallery", "stream", "list"])
+    )]
+    pub default_view: String,
 }
 
 impl Args {
@@ -247,6 +255,7 @@ impl Args {
             max_file_size_encrypted_mb: self.max_file_size_encrypted_mb,
             max_file_size_unencrypted_mb: self.max_file_size_unencrypted_mb,
             translate_url: self.translate_url,
+            default_view: self.default_view,
         }
     }
 

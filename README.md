@@ -14,6 +14,7 @@ BitVault is a maintained fork of [Microbin](https://github.com/szabodanika/micro
 - Single self-contained binary — no runtime dependencies, minimal resource usage
 - Client-side and server-side encryption for secure sharing
 - File uploads and raw content serving (eg. `server.com/file/my-upload`, `server.com/raw/my-upload`)
+- Multiple attachments per upload with gallery / stream / list views and ZIP download; with client-side encryption several files are bundled into one ZIP in the browser before being encrypted
 - URL shortening and redirection
 - QR code generation for easy mobile access
 - Syntax highlighting for pasted code
@@ -145,6 +146,7 @@ Secret values (`BITVAULT_ADMIN_USERNAME`, `BITVAULT_ADMIN_PASSWORD`, `BITVAULT_B
 | `BITVAULT_MAX_EXPIRY` | `--max-expiry` | `1week` | Maximum expiration users may select |
 | `BITVAULT_DEFAULT_BURN_AFTER` | `--default-burn-after` / `-d` | `0` | Default burn-after-read count (0 = off) |
 | `BITVAULT_DEFAULT_PRIVACY` | `--default-privacy` | — | Default privacy level (`public`, `unlisted`, `readonly`, `private`, `secret`) |
+| `BITVAULT_DEFAULT_VIEW` | `--default-view` | `gallery` | Default layout for multi-file uploads: `gallery` (thumbnail grid), `stream` (one file per row, full width) or `list` (table). Viewers can still switch with the selector on the page. |
 | `BITVAULT_EDITABLE` | `--editable` | `false` | Allow pastes to be edited after creation |
 | `BITVAULT_READONLY` | `--readonly` | `false` | Disable all write operations |
 | `BITVAULT_PRIVATE` | `--private` | `false` | Require auth for all read access |

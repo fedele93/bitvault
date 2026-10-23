@@ -59,6 +59,16 @@ impl PastaFile {
     pub fn embeddable(&self) -> bool {
         self.is_image() || self.is_video()
     }
+
+    /// Upper-cased file extension used as a placeholder label for files that
+    /// cannot be previewed (e.g. "PDF", "ZIP"); "FILE" when there is none.
+    pub fn extension(&self) -> String {
+        Path::new(&self.name)
+            .extension()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or("FILE")
+            .to_uppercase()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

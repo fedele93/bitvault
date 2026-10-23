@@ -35,6 +35,13 @@
   {% if args.translate_url_as_str() != "" && args.public_path_as_str() != "" && pasta.content != "" && pasta.pasta_type != "url" && !pasta.encrypt_client && !pasta.encrypt_server %}
   <a style="margin-left: 0.5rem" href="{{ args.translate_url_as_str() }}?from={{ args.public_path_as_str()|urlencode }}/raw/{{ pasta.id_as_words()|urlencode }}">Translate</a>
   {%- endif %}
+  {% if pasta.has_attachments() && !pasta.encrypt_client %}
+  <select style="margin-left: 0.5rem" id="view-selector" class="small-button" title="Attachment layout">
+    <option value="gallery">Gallery</option>
+    <option value="stream">Stream</option>
+    <option value="list">List</option>
+  </select>
+  {%- endif %}
 </div>
 
 <br>
@@ -87,7 +94,7 @@ justify-content: center; align-items: center;">
 </div>
 {%- endif %}
 
-{% if pasta.file.is_some() && !pasta.file_embeddable() && !pasta.encrypt_client %}
+{% if pasta.file.is_some() && !pasta.file_embeddable() && !pasta.encrypt_client && !pasta.has_attachments() %}
 <span style="margin-left: auto; margin-right: auto; display: flex;
     justify-content: center; align-items: center;">
   <p style="font-size: small;">{{pasta.file.as_ref().unwrap().name()}}
@@ -100,40 +107,56 @@ justify-content: center; align-items: center;">
 </span>
 {%- endif %}
 
-{% if pasta.has_attachments() && pasta.encrypt_server && !pasta.encrypt_client %}
-<div style="margin-top: 1rem;">
-  <p style="font-size: small;"><b>Attachments</b> (password required)</p>
-  {% for attachment in pasta.attachments.as_ref().unwrap() %}
-  <span style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
-    <p style="font-size: small; margin: 0;">{{attachment.name()}} [{{attachment.size}}]</p>
-    <a href="{{ args.public_path_as_str()}}/file/{{pasta.id_as_words()}}?fname={{attachment.name()|urlencode}}">
-      <button class="download-button">Download</button>
-    </a>
-  </span>
-  {%- endfor %}
-</div>
-{%- endif %}
+{% if pasta.has_attachments() && !pasta.encrypt_client %}
+<div id="attachments" style="margin-top: 1rem;">
+  <p style="font-size: small;"><b>Attachments</b>{% if pasta.encrypt_server %} (password required){% endif %}</p>
 
-{% if pasta.has_attachments() && !pasta.encrypt_client && !pasta.encrypt_server %}
-<div style="margin-top: 1rem;">
-  <p style="font-size: small;"><b>Attachments</b></p>
-  {% for attachment in pasta.attachments.as_ref().unwrap() %}
-  <span style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.3rem;">
-    <p style="font-size: small; margin: 0;">{{attachment.name()}} [{{attachment.size}}]</p>
-    <a href="{{ args.public_path_as_str()}}/file/{{pasta.id_as_words()}}?fname={{attachment.name()|urlencode}}">
-      <button class="download-button">Download</button>
-    </a>
-  </span>
-  {%- endfor %}
-  <a href="{{ args.public_path_as_str()}}/archive/{{pasta.id_as_words()}}">
+  <div id="gallery-view" class="gallery-grid">
+    {% if pasta.file.is_some() %}
+      {% let file = pasta.file.as_ref().unwrap() %}
+      {% include "file_card.html" %}
+    {% endif %}
+    {% for file in pasta.attachments.as_ref().unwrap() %}
+      {% include "file_card.html" %}
+    {% endfor %}
+  </div>
+
+  <div id="list-view" style="display: none;">
+    <table class="attachment-table">
+      <thead>
+        <tr><th>Filename</th><th>Size</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% if pasta.file.is_some() %}
+        {% let file = pasta.file.as_ref().unwrap() %}
+        <tr>
+          <td>{{ file.name() }}</td>
+          <td>{{ file.size }}</td>
+          <td><a href="{{ args.public_path_as_str() }}/file/{{ pasta.id_as_words() }}?fname={{ file.name()|urlencode }}" {% if !pasta.encrypt_server %}download{% endif %}>Download</a></td>
+        </tr>
+        {% endif %}
+        {% for file in pasta.attachments.as_ref().unwrap() %}
+        <tr>
+          <td>{{ file.name() }}</td>
+          <td>{{ file.size }}</td>
+          <td><a href="{{ args.public_path_as_str() }}/file/{{ pasta.id_as_words() }}?fname={{ file.name()|urlencode }}" {% if !pasta.encrypt_server %}download{% endif %}>Download</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if !pasta.encrypt_server %}
+  <a href="{{ args.public_path_as_str() }}/archive/{{ pasta.id_as_words() }}">
     <button class="download-button" style="margin-top: 0.5rem;">Download all as ZIP</button>
   </a>
+  {%- endif %}
 </div>
 {%- endif %}
 
 
 {% if pasta.file.is_some() && pasta.file.as_ref().unwrap().is_image() &&
-pasta.file_embeddable() && !pasta.encrypt_client %}
+pasta.file_embeddable() && !pasta.encrypt_client && !pasta.has_attachments() %}
 <img id="embed" src="{{ args.public_path_as_str()}}/file/{{pasta.id_as_words()}}" height="300" />
 <span style="margin-left: auto; margin-right: auto; display: flex;
   justify-content: center; align-items: center;">
@@ -149,7 +172,7 @@ pasta.file_embeddable() && !pasta.encrypt_client %}
 
 
 {% if pasta.file.is_some() && pasta.file.as_ref().unwrap().is_video() &&
-pasta.file_embeddable() && !pasta.encrypt_client %}
+pasta.file_embeddable() && !pasta.encrypt_client && !pasta.has_attachments() %}
 <video id="embed" controls src="{{ args.public_path_as_str()}}/file/{{pasta.id_as_words()}}" height="300"></video>
 <span style="margin-left: auto; margin-right: auto; display: flex;
   justify-content: center; align-items: center;">
@@ -341,7 +364,9 @@ if (gotoURL) {
   });
   // {% endif  %} 
 
-  decryptButton.addEventListener("click", () => {
+  // The button only exists when the pasta has text content (file-only
+  // secret uploads have nothing to decrypt inline).
+  if (decryptButton) decryptButton.addEventListener("click", () => {
     password = passwordField.value;
 
     content = contentDecrypted = escapeHtml(decryptWithPassword(password, content));
@@ -349,7 +374,7 @@ if (gotoURL) {
       contentElement.innerHTML = contentDecrypted;
       // {% if pasta.extension == "auto" %}
       hljs.highlightAll();
-      // {% endif  %} 
+      // {% endif  %}
       contentElement.innerHTML = wrapStringInCodeLines(contentElement.innerHTML);
       // decryptDiv.style.display = 'none';
     }
@@ -392,6 +417,46 @@ if (gotoURL) {
   upd(); intervalId = setInterval(upd, 1000);
 })();
 </script>
+
+{% if pasta.has_attachments() && !pasta.encrypt_client %}
+<script>
+  // Attachment layout: ?view=... in the URL wins, otherwise the server-side
+  // default (BITVAULT_DEFAULT_VIEW). Switching updates the URL so the choice
+  // survives a reload / can be shared.
+  (() => {
+    const galleryView = document.getElementById('gallery-view');
+    const listView = document.getElementById('list-view');
+    const viewSelector = document.getElementById('view-selector');
+    const allowed = ['gallery', 'stream', 'list'];
+    const serverDefault = '{{ args.default_view }}';
+
+    function applyView(view) {
+      galleryView.classList.remove('stream-view');
+      if (view === 'list') {
+        galleryView.style.display = 'none';
+        listView.style.display = 'block';
+      } else {
+        if (view === 'stream') galleryView.classList.add('stream-view');
+        galleryView.style.display = '';
+        listView.style.display = 'none';
+      }
+    }
+
+    const requested = new URLSearchParams(window.location.search).get('view');
+    const initial = allowed.includes(requested) ? requested : serverDefault;
+    viewSelector.value = initial;
+    applyView(initial);
+
+    viewSelector.addEventListener('change', (e) => {
+      const view = e.target.value;
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', view);
+      window.history.replaceState({}, '', url);
+      applyView(view);
+    });
+  })();
+</script>
+{%- endif %}
 
 <style>
   code-line {
@@ -468,6 +533,111 @@ if (gotoURL) {
     padding-left: 0.8rem;
     padding-right: 0.8rem;
     cursor: pointer;
+  }
+
+  /* Attachment views (gallery / stream / list) */
+  .gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+  }
+
+  .file-card {
+    background-color: var(--background-alt, #b0b9cc0d);
+    border-radius: 8px;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .embed-media {
+    width: 100%;
+    border-radius: 4px;
+  }
+
+  .gallery-grid .embed-media {
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+  }
+
+  .file-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--background, #eee);
+    color: var(--text-muted, #555);
+    font-weight: bold;
+    letter-spacing: 0.05em;
+  }
+
+  .file-card-footer {
+    margin-top: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .file-card-meta {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-grow: 1;
+  }
+
+  .file-card-name {
+    font-size: small;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .file-card-size {
+    font-size: x-small;
+    color: gray;
+  }
+
+  .file-card-button {
+    margin: 0;
+    padding: 4px 8px;
+    font-size: small;
+  }
+
+  .stream-view {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 2rem !important;
+  }
+
+  .stream-view .file-card {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .stream-view .embed-media {
+    aspect-ratio: auto;
+    object-fit: contain;
+    max-height: 80vh;
+  }
+
+  .attachment-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .attachment-table th,
+  .attachment-table td {
+    padding: 8px;
+    text-align: left;
+    font-size: small;
+  }
+
+  .attachment-table thead tr {
+    border-bottom: 1px solid #ccc;
   }
 </style>
 

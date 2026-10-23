@@ -1,0 +1,32 @@
+<!-- One attachment tile for the gallery / stream views on upload.html.
+     Expects `file` (a PastaFile) and `pasta` to be in scope. -->
+<div class="file-card">
+{% if !pasta.encrypt_client && !pasta.encrypt_server %}
+    {% if file.is_image() %}
+    <a href="{{ args.public_path_as_str() }}/file/{{ pasta.id_as_words() }}?fname={{ file.name()|urlencode }}&preview=true" target="_blank" style="width: 100%; display: block;">
+        <img class="embed-media" src="{{ args.public_path_as_str() }}/file/{{ pasta.id_as_words() }}?fname={{ file.name()|urlencode }}&preview=true" alt="{{ file.name() }}" loading="lazy" />
+    </a>
+    {% else if file.is_video() %}
+    <video class="embed-media" controls preload="metadata" src="{{ args.public_path_as_str() }}/file/{{ pasta.id_as_words() }}?fname={{ file.name()|urlencode }}&preview=true"></video>
+    {% else %}
+    <div class="embed-media file-placeholder"><span>{{ file.extension() }}</span></div>
+    {% endif %}
+{% else %}
+    <!-- Encrypted files cannot be previewed: show the type (server-side) or a lock (client-side) -->
+    <div class="embed-media file-placeholder">
+        {% if pasta.encrypt_client %}<span>LOCKED</span>{% else %}<span>{{ file.extension() }}</span>{% endif %}
+    </div>
+{% endif %}
+
+<div class="file-card-footer">
+  <div class="file-card-meta">
+      <small class="file-card-name" title="{{ file.name() }}">{{ file.name() }}</small>
+      <small class="file-card-size">{{ file.size }}</small>
+  </div>
+  {% if !pasta.encrypt_client %}
+  <a href="{{ args.public_path_as_str() }}/file/{{ pasta.id_as_words() }}?fname={{ file.name()|urlencode }}" {% if !pasta.encrypt_server %}download{% endif %}>
+    <button class="download-button file-card-button">Download</button>
+  </a>
+  {% endif %}
+</div>
+</div>

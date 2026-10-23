@@ -295,6 +295,9 @@
 </form>
 <br>
 <br>
+{% if !args.no_file_upload && args.encryption_client_side %}
+<script type="text/javascript" src="{{ args.public_path_as_str() }}/static/jszip.min.js"></script>
+{%- endif %}
 <script>
     const form = document.getElementById("pasta-form");
     const submitButton = document.getElementById("submit-button");
@@ -343,6 +346,10 @@
                     content.value = contentInput.value;
                 }
                 hiddenPlainKeyField.name = "";
+                submitButton.disabled = true;
+                submitButton.textContent = hiddenFileButton.files.length > 1 ? 'Zipping & encrypting...' : 'Encrypting...';
+                // Yield to the UI so the label above is actually painted
+                await new Promise(r => setTimeout(r, 10));
                 await encryptFile();
             } else {
                 hiddenPlainKeyField.value = passwordField.value;
@@ -438,60 +445,41 @@
         return false;
     }
 
-    function encryptFile() {
+    function readFileAsArrayBuffer(file) {
         return new Promise((resolve, reject) => {
-            const files = Array.from(hiddenFileButton.files);
-            if (files.length === 0) {
-                resolve();
-                return;
-            }
-            const encryptPromises = files.map(file => new Promise((res, rej) => {
-                const reader = new FileReader();
-                reader.onload = function (event) {
-                    const encryptedContents = encryptFileWithPassword(
-                        passwordField.value.trim(),
-                        new Uint8Array(event.target.result)
-                    );
-                    res(new File([encryptedContents], file.name, { type: file.type }));
-                };
-                reader.onerror = rej;
-                reader.readAsArrayBuffer(file);
-            }));
-            Promise.all(encryptPromises).then(encryptedFiles => {
-                const container = new DataTransfer();
-                encryptedFiles.forEach(f => container.items.add(f));
-                hiddenFileButton.files = container.files;
-                resolve();
-            }).catch(reject);
+            const reader = new FileReader();
+            reader.onload = (event) => resolve(event.target.result);
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
         });
     }
 
-    // "secret" mode uses client-side encryption which only supports a single
-    // file (the JS decrypt flow in upload.html is per-pasta, not per-attachment).
-    // Disable multi-file selection when that mode is active, and trim any
-    // already-selected files down to one when the user switches into secret mode.
-    function isSecret() {
-        return privacyDropdown && privacyDropdown.value === 'secret';
-    }
-    function trimToSingleFile() {
-        if (hiddenFileButton.files.length > 1) {
-            const dt = new DataTransfer();
-            dt.items.add(hiddenFileButton.files[0]);
-            hiddenFileButton.files = dt.files;
-            attachFileButton.textContent = "Attached: " + hiddenFileButton.files[0].name;
+    // Client-side ("secret") encryption: the browser encrypts every byte before
+    // it leaves the machine. The decrypt flow in upload.html is per-pasta (one
+    // key, one file), so when several files are selected we first bundle them
+    // into a single ZIP with JSZip and encrypt that archive as the only file.
+    async function encryptFile() {
+        const files = Array.from(hiddenFileButton.files);
+        if (files.length === 0) {
+            return;
         }
-    }
-    function applyMultipleAttr() {
-        if (isSecret()) {
-            hiddenFileButton.removeAttribute('multiple');
-            trimToSingleFile();
+        const password = passwordField.value.trim();
+        const container = new DataTransfer();
+
+        if (files.length > 1) {
+            const zip = new JSZip();
+            for (const file of files) {
+                zip.file(file.name, await readFileAsArrayBuffer(file));
+            }
+            const buffer = await zip.generateAsync({ type: "arraybuffer" });
+            const encryptedContents = encryptFileWithPassword(password, new Uint8Array(buffer));
+            container.items.add(new File([encryptedContents], "archive.zip", { type: "application/zip" }));
         } else {
-            hiddenFileButton.setAttribute('multiple', '');
+            const file = files[0];
+            const encryptedContents = encryptFileWithPassword(password, new Uint8Array(await readFileAsArrayBuffer(file)));
+            container.items.add(new File([encryptedContents], file.name, { type: file.type }));
         }
-    }
-    if (privacyDropdown) {
-        privacyDropdown.addEventListener('change', applyMultipleAttr);
-        applyMultipleAttr(); // set initial state
+        hiddenFileButton.files = container.files;
     }
 
     hiddenFileButton.addEventListener('change', function () {
@@ -517,17 +505,12 @@
         evt.preventDefault();
         const dt = new DataTransfer();
         const dropped = evt.dataTransfer.files;
-        if (isSecret()) {
-            // Secret mode: replace with the first dropped file only.
-            if (dropped.length > 0) dt.items.add(dropped[0]);
-        } else {
-            // Keep existing selection and append all dropped files.
-            for (let i = 0; i < hiddenFileButton.files.length; i++) {
-                dt.items.add(hiddenFileButton.files[i]);
-            }
-            for (let i = 0; i < dropped.length; i++) {
-                dt.items.add(dropped[i]);
-            }
+        // Keep existing selection and append all dropped files.
+        for (let i = 0; i < hiddenFileButton.files.length; i++) {
+            dt.items.add(hiddenFileButton.files[i]);
+        }
+        for (let i = 0; i < dropped.length; i++) {
+            dt.items.add(dropped[i]);
         }
         hiddenFileButton.files = dt.files;
         if (dt.files.length === 1) {
@@ -545,35 +528,25 @@
         if (!items) return;
         const dt = new DataTransfer();
         let added = 0;
-        if (isSecret()) {
-            // Secret mode: replace with the first pasted file only.
-            for (let i = 0; i < items.length; i++) {
-                if (items[i].kind === 'file') {
-                    const pastedFile = items[i].getAsFile();
-                    if (pastedFile) { dt.items.add(pastedFile); added++; break; }
-                }
-            }
-        } else {
-            // Keep existing files and append pasted ones (deduplicated).
-            for (let i = 0; i < hiddenFileButton.files.length; i++) {
-                dt.items.add(hiddenFileButton.files[i]);
-            }
-            for (let i = 0; i < items.length; i++) {
-                if (items[i].kind === 'file') {
-                    const pastedFile = items[i].getAsFile();
-                    if (!pastedFile) continue;
-                    // Deduplicate by name+size+type
-                    let duplicate = false;
-                    for (let j = 0; j < dt.files.length; j++) {
-                        if (dt.files[j].name === pastedFile.name &&
-                            dt.files[j].size === pastedFile.size &&
-                            dt.files[j].type === pastedFile.type) {
-                            duplicate = true;
-                            break;
-                        }
+        // Keep existing files and append pasted ones (deduplicated).
+        for (let i = 0; i < hiddenFileButton.files.length; i++) {
+            dt.items.add(hiddenFileButton.files[i]);
+        }
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].kind === 'file') {
+                const pastedFile = items[i].getAsFile();
+                if (!pastedFile) continue;
+                // Deduplicate by name+size+type
+                let duplicate = false;
+                for (let j = 0; j < dt.files.length; j++) {
+                    if (dt.files[j].name === pastedFile.name &&
+                        dt.files[j].size === pastedFile.size &&
+                        dt.files[j].type === pastedFile.type) {
+                        duplicate = true;
+                        break;
                     }
-                    if (!duplicate) { dt.items.add(pastedFile); added++; }
                 }
+                if (!duplicate) { dt.items.add(pastedFile); added++; }
             }
         }
         if (added > 0) {

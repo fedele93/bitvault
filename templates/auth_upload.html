@@ -16,7 +16,8 @@
       <a href="/guide#encryption">﹖</a></sup></label>
   <input id="password-field" required placeholder="Password" type="password" autocomplete="off">
   <input id="password-hidden" name="password" type="hidden">
-  <button>Okay</button>
+  <button id="auth-submit">Okay</button>
+  <b id="wrong-key" style="display: none;">Incorrect password.</b>
 
   {% if status == "incorrect" %}
   <b>
@@ -30,35 +31,40 @@
   const form = document.getElementById("auth-form");
   const passwordField = document.getElementById("password-field");
   const passwordHiddenField = document.getElementById("password-hidden");
+  const submitButton = document.getElementById("auth-submit");
+  const wrongKey = document.getElementById("wrong-key");
 
-  form.onsubmit = function () {
-
-    if (passwordField.value.trim() == "") {
+  // The password never leaves the browser: it only unlocks the random key
+  // that the server needs for its own encryption layer, and that key is what
+  // gets posted.
+  form.onsubmit = function (event) {
+    event.preventDefault();
+    const password = passwordField.value.trim();
+    if (password == "") {
       passwordField.focus();
       return false;
     }
+    wrongKey.style.display = "none";
+    submitButton.disabled = true;
+    submitButton.textContent = "Checking...";
 
-    let key = decryptWithPassword(passwordField.value, "{{ encrypted_key }}");
-
-    if (key) {
+    BVCrypto.decryptString(password, "{{ encrypted_key }}").then((key) => {
+      if (key === null) {
+        wrongKey.style.display = "inline";
+        passwordField.select();
+        return;
+      }
       passwordHiddenField.value = key;
-    }
-
+      form.submit();
+    }).catch((err) => {
+      console.error(err);
+      alert("Decryption failed: " + err.message);
+    }).finally(() => {
+      submitButton.disabled = false;
+      submitButton.textContent = "Okay";
+    });
+    return false;
   };
-
-  function decryptWithPassword(password, encryptedHex) {
-    const passwordBytes = aesjs.utils.utf8.toBytes(password.padStart(32, "#"));
-    const encryptedBytes = aesjs.utils.hex.toBytes(encryptedHex);
-    const aesCtr = new aesjs.ModeOfOperation.ctr(passwordBytes);
-    const decryptedBytes = aesCtr.decrypt(encryptedBytes);
-    const res = aesjs.utils.utf8.fromBytes(decryptedBytes);
-
-    if (res.endsWith("!0K")) {
-      return res.substring(0, res.length - "!0K".length);
-    } else {
-      return null;
-    }
-  }
 </script>
 
 {% else %}
@@ -89,18 +95,10 @@
   const passwordField = document.getElementById("password-field");
 
   form.onsubmit = function () {
-
     if (passwordField.value.trim() == "") {
       passwordField.focus();
       return false;
     }
-
-    let key = decryptWithPassword(passwordField.value, "{{ encrypted_key }}");
-
-    if (key) {
-      passwordHiddenField.value = key;
-    }
-
   };
 
 </script>

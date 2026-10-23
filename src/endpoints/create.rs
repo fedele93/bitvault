@@ -326,6 +326,10 @@ pub async fn create(
                         }
                         new_pasta.pasta_type = String::from("text");
                     }
+                    // Marker sent by the form in secret mode; its value is
+                    // irrelevant (the privacy field already decides), so just
+                    // drain it instead of logging it as unexpected.
+                    "encrypt_client" => while field.try_next().await?.is_some() {},
                     unknown_field => {
                         log::error!("Unexpected multipart field: {:?}", unknown_field);
                     }

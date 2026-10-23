@@ -337,20 +337,36 @@
             if (fileOversized()) return false;
 
             if (privacyDropdown.value == "secret") {
-                let randomKey = Array.from(Array(16), () => Math.floor(Math.random() * 36).toString(36)).join('');
-                hiddenRandomKeyField.value = randomKey;
-                hiddenEncryptedRandomKeyField.value = encryptWithPassword(passwordField.value, randomKey);
-                if (contentInput.value.trim() != "") {
-                    content.value = encryptWithPassword(passwordField.value.trim(), contentInput.value);
-                } else {
-                    content.value = contentInput.value;
+                if (!BVCrypto.available()) {
+                    alert("Secret (client-side encrypted) uploads need HTTPS or localhost: this browser does not provide WebCrypto on this page. Use 'private' instead, or open the site over HTTPS.");
+                    return false;
                 }
-                hiddenPlainKeyField.name = "";
                 submitButton.disabled = true;
                 submitButton.textContent = hiddenFileButton.files.length > 1 ? 'Zipping & encrypting...' : 'Encrypting...';
                 // Yield to the UI so the label above is actually painted
                 await new Promise(r => setTimeout(r, 10));
-                await encryptFile();
+                try {
+                    const password = passwordField.value.trim();
+                    // One salt per upload: the key derivation runs once and is
+                    // reused for the random key, the text and the file.
+                    const salt = BVCrypto.newSalt();
+                    const randomKey = BVCrypto.randomKeyHex();
+                    hiddenRandomKeyField.value = randomKey;
+                    hiddenEncryptedRandomKeyField.value = await BVCrypto.encryptString(password, randomKey, salt);
+                    if (contentInput.value.trim() != "") {
+                        content.value = await BVCrypto.encryptString(password, contentInput.value, salt);
+                    } else {
+                        content.value = contentInput.value;
+                    }
+                    hiddenPlainKeyField.name = "";
+                    await encryptFile(password, salt);
+                } catch (err) {
+                    console.error(err);
+                    alert("Encryption failed: " + err.message);
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Save';
+                    return false;
+                }
             } else {
                 hiddenPlainKeyField.value = passwordField.value;
                 hiddenEncryptedClientSide.name = "";
@@ -409,25 +425,22 @@
         }, 1000);
     };
 
-    function encryptWithPassword(password, plaintext) {
-        const passwordBytes = aesjs.utils.utf8.toBytes(password.padStart(32, "#"));
-        const plaintextBytes = aesjs.utils.utf8.toBytes(plaintext + "!0K");
-        const aesCtr = new aesjs.ModeOfOperation.ctr(passwordBytes);
-        const encryptedBytes = aesCtr.encrypt(plaintextBytes);
-        return aesjs.utils.hex.fromBytes(encryptedBytes);
-    }
-
-    function encryptFileWithPassword(password, bytes) {
-        const passwordBytes = aesjs.utils.utf8.toBytes(password.padStart(32, "#"));
-        const aesCtr = new aesjs.ModeOfOperation.ctr(passwordBytes);
-        const encryptedBytes = aesCtr.encrypt(bytes);
-        return aesjs.utils.hex.fromBytes(encryptedBytes);
-    }
-
     function fileOversized() {
         const maxEncMb = parseInt("{{ args.max_file_size_encrypted_mb }}");
         const maxUnencMb = parseInt("{{ args.max_file_size_unencrypted_mb }}");
         const isEncrypted = privacyDropdown.value == "secret" || privacyDropdown.value == "private";
+        // Secret mode bundles everything into one archive that is zipped and
+        // encrypted in the browser's memory, so the *total* size is what counts.
+        if (privacyDropdown.value == "secret") {
+            let totalMb = 0;
+            for (let i = 0; i < hiddenFileButton.files.length; i++) {
+                totalMb += hiddenFileButton.files.item(i).size / 1024 ** 2;
+            }
+            if (totalMb > maxEncMb) {
+                attachFileButton.textContent = "Secret uploads are limited to {{ args.max_file_size_encrypted_mb }} MB in total";
+                return true;
+            }
+        }
         for (let i = 0; i < hiddenFileButton.files.length; i++) {
             const fileSizeMb = hiddenFileButton.files.item(i).size / 1024 ** 2;
             if (isEncrypted) {
@@ -458,27 +471,27 @@
     // it leaves the machine. The decrypt flow in upload.html is per-pasta (one
     // key, one file), so when several files are selected we first bundle them
     // into a single ZIP with JSZip and encrypt that archive as the only file.
-    async function encryptFile() {
+    async function encryptFile(password, salt) {
         const files = Array.from(hiddenFileButton.files);
         if (files.length === 0) {
             return;
         }
-        const password = passwordField.value.trim();
         const container = new DataTransfer();
 
+        let name, plain;
         if (files.length > 1) {
             const zip = new JSZip();
             for (const file of files) {
                 zip.file(file.name, await readFileAsArrayBuffer(file));
             }
-            const buffer = await zip.generateAsync({ type: "arraybuffer" });
-            const encryptedContents = encryptFileWithPassword(password, new Uint8Array(buffer));
-            container.items.add(new File([encryptedContents], "archive.zip", { type: "application/zip" }));
+            name = "archive.zip";
+            plain = new Uint8Array(await zip.generateAsync({ type: "arraybuffer" }));
         } else {
-            const file = files[0];
-            const encryptedContents = encryptFileWithPassword(password, new Uint8Array(await readFileAsArrayBuffer(file)));
-            container.items.add(new File([encryptedContents], file.name, { type: file.type }));
+            name = files[0].name;
+            plain = new Uint8Array(await readFileAsArrayBuffer(files[0]));
         }
+        const encrypted = await BVCrypto.encryptBytes(password, plain, salt);
+        container.items.add(new File([encrypted], name, { type: "application/octet-stream" }));
         hiddenFileButton.files = container.files;
     }
 

@@ -65,7 +65,7 @@ justify-content: center; align-items: center;">
     </button>
     {%- endif %}
     {%- endif %}
-    {% if pasta.file.is_some() && !pasta.file_embeddable() %}
+    {% if pasta.file.is_some() %}
     <button class="small-button" id="download-button" style="margin-right:
   0.5rem">
       <b>
@@ -313,94 +313,92 @@ if (gotoURL) {
   const passwordField = document.getElementById("password-field");
   const downloadButton = document.getElementById('download-button');
 
-  // {% if pasta.file.is_some() %}
-  // Set up event listener for download link click
-  downloadButton.addEventListener('click', async (event) => {
-    event.preventDefault(); // prevent default click behavior
+  function wrongKey() {
+    passwordField.focus();
+    passwordField.select();
+    alert("Wrong key: could not decrypt this upload.");
+  }
 
-    if (passwordField.value.trim() == "") {
+  // {% if pasta.file.is_some() %}
+  downloadButton.addEventListener('click', async (event) => {
+    event.preventDefault();
+
+    const password = passwordField.value.trim();
+    if (password == "") {
       passwordField.focus();
       return false;
     }
 
-    // Fetch encrypted file from server
-    const formData = new FormData();
+    const originalLabel = downloadButton.innerHTML;
+    downloadButton.disabled = true;
+    downloadButton.textContent = 'Decrypting...';
+    try {
+      // 1. Recover the per-upload random key the server needs for its own layer.
+      // {% if pasta.encrypted_key.is_some() %}
+      const key = await BVCrypto.decryptString(password, "{{ pasta.encrypted_key.as_ref().unwrap() }}");
+      // {%- else %}
+      const key = null;
+      // {%- endif %}
+      if (key === null) { wrongKey(); return false; }
 
-    // {% if pasta.encrypted_key.is_some() %}
-    let key = decryptWithPassword(passwordField.value.trim(), "{{ pasta.encrypted_key.as_ref().unwrap() }}");
-    // {%- endif %}
-    formData.append('password', key);
+      // 2. Ask the server to strip its layer and hand back our ciphertext.
+      const formData = new FormData();
+      formData.append('password', key);
+      const response = await fetch('{{ args.public_path_as_str() }}/secure_file/{{ pasta.id_as_words() }}', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        alert("The server refused the download (" + response.status + ").");
+        return false;
+      }
 
-    const response = await fetch('/secure_file/{{ pasta.id_as_words() }}', {
-      method: 'POST',
-      body: formData,
-    })
+      // 3. Decrypt in the browser. Works for both the current and the legacy format.
+      const encrypted = new Uint8Array(await response.arrayBuffer());
+      const decrypted = await BVCrypto.decryptBytes(password, encrypted);
+      if (decrypted === null) { wrongKey(); return false; }
 
-    // {% if pasta.file.is_some() %}
-    const encryptedFile = await response.text();
-
-    // Decrypt file contents
-    const decryptedContents = decryptFileWithPassword(passwordField.value.trim(), encryptedFile);
-    if (!decryptedContents) {
-      throw new Error('Failed to decrypt file');
+      const blob = new Blob([decrypted], { type: 'application/octet-stream' });
+      const tempAnchorEl = document.createElement('a');
+      tempAnchorEl.href = URL.createObjectURL(blob);
+      tempAnchorEl.download = '{{pasta.file.as_ref().unwrap().name()}}';
+      tempAnchorEl.click();
+      setTimeout(() => URL.revokeObjectURL(tempAnchorEl.href), 60000);
+    } catch (err) {
+      console.error(err);
+      alert("Download failed: " + err.message);
+    } finally {
+      downloadButton.disabled = false;
+      downloadButton.innerHTML = originalLabel;
     }
-
-    // Create blob from decrypted file contents
-    const decryptedBlob = new Blob([decryptedContents], { type: 'application/octet-stream' });
-
-    // Create data URI for decrypted file
-    // const dataUri = `data:application/octet-stream;${encodeURIComponent(decryptedContents)}`;
-
-    // Create temporary anchor element
-    const tempAnchorEl = document.createElement('a');
-    // tempAnchorEl.href = dataUri;
-    tempAnchorEl.href = URL.createObjectURL(decryptedBlob);
-    tempAnchorEl.download = '{{pasta.file.as_ref().unwrap().name()}}';
-
-    // Programmatically click anchor element to trigger download
-    tempAnchorEl.click();
-
-    // {%- endif %}
   });
-  // {% endif  %} 
+  // {% endif  %}
 
   // The button only exists when the pasta has text content (file-only
   // secret uploads have nothing to decrypt inline).
-  if (decryptButton) decryptButton.addEventListener("click", () => {
-    password = passwordField.value;
-
-    content = contentDecrypted = escapeHtml(decryptWithPassword(password, content));
-    if (contentDecrypted) {
-      contentElement.innerHTML = contentDecrypted;
-      // {% if pasta.extension == "auto" %}
-      hljs.highlightAll();
-      // {% endif  %}
-      contentElement.innerHTML = wrapStringInCodeLines(contentElement.innerHTML);
-      // decryptDiv.style.display = 'none';
+  if (decryptButton) decryptButton.addEventListener("click", async () => {
+    const password = passwordField.value.trim();
+    if (password == "") {
+      passwordField.focus();
+      return;
     }
+    let plain;
+    try {
+      plain = await BVCrypto.decryptString(password, content);
+    } catch (err) {
+      console.error(err);
+      alert("Decryption failed: " + err.message);
+      return;
+    }
+    if (plain === null) { wrongKey(); return; }
+
+    content = escapeHtml(plain);
+    contentElement.innerHTML = content;
+    // {% if pasta.extension == "auto" %}
+    hljs.highlightAll();
+    // {% endif  %}
+    contentElement.innerHTML = wrapStringInCodeLines(contentElement.innerHTML);
   });
-
-  function decryptWithPassword(password, encryptedHex) {
-    const passwordBytes = aesjs.utils.utf8.toBytes(password.padStart(32, "#"));
-    const encryptedBytes = aesjs.utils.hex.toBytes(encryptedHex);
-    const aesCtr = new aesjs.ModeOfOperation.ctr(passwordBytes);
-    const decryptedBytes = aesCtr.decrypt(encryptedBytes);
-    const res = aesjs.utils.utf8.fromBytes(decryptedBytes);
-
-    if (res.endsWith("!0K")) {
-      return res.substring(0, res.length - "!0K".length);
-    } else {
-      return null;
-    }
-  }
-
-  function decryptFileWithPassword(password, encryptedHex) {
-    const passwordBytes = aesjs.utils.utf8.toBytes(password.padStart(32, "#"));
-    const encryptedBytes = aesjs.utils.hex.toBytes(encryptedHex);
-    const aesCtr = new aesjs.ModeOfOperation.ctr(passwordBytes);
-    const decryptedBytes = aesCtr.decrypt(encryptedBytes);
-    return decryptedBytes;
-  }
 // {% endif %}
 
 (function () {
